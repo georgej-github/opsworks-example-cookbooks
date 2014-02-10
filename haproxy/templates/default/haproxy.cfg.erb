@@ -131,6 +131,28 @@ backend static_servers_ssl
   server <%= backend['name'] %> <%= backend['ip'] %>:443 weight <%= backend['backends'] || 10 %> maxconn <%= backend['backends'] * node[:haproxy][:maxcon_factor_static_ssl] %> check inter <%= node[:haproxy][:check_interval] %> 
   <% end -%>
 <% end -%>
+
+<% if !node[:haproxy][:photoapp_backends].empty? -%>  
+backend photoapp_servers
+  balance <%= node[:haproxy][:balance] %>
+  option redispatch
+  option forwardfor
+  option httpchk GET <%= node[:haproxy][:health_check_url] %> # Nginx doesn't understand OPTIONS
+  <% node[:haproxy][:photoapp_backends].each do |backend| -%>
+  server <%= backend['name'] %> <%= backend['ip'] %>:80 weight <%= backend['backends'] || 10 %> maxconn <%= backend['backends'] * node[:haproxy][:maxcon_factor_static] %> check inter <%= node[:haproxy][:check_interval] %> 
+  <% end -%>
+<% end -%>
+
+<% if !node[:haproxy][:photoapp_backends].empty? -%>  
+backend photoapp_servers_ssl
+  mode tcp
+  balance <%= node[:haproxy][:balance] %>
+  option redispatch
+  option ssl-hello-chk
+  <% node[:haproxy][:photoapp_backends].each do |backend| -%>
+  server <%= backend['name'] %> <%= backend['ip'] %>:443 weight <%= backend['backends'] || 10 %> maxconn <%= backend['backends'] * node[:haproxy][:maxcon_factor_static_ssl] %> check inter <%= node[:haproxy][:check_interval] %> 
+  <% end -%>
+<% end -%>
   
 frontend http-in
   bind :80
@@ -174,6 +196,16 @@ frontend http-in
       <% end -%>
     <% end -%>
   <% end -%>
+  
+  # all domains of photoapp applications
+  <% node[:haproxy][:photoapp_applications].each do |app_name, app_config| -%>
+    <% app_config['domains'].each do |domain| -%>
+  acl photoapp_application_<%= app_name %>_domain_<%= domain.gsub(/[^\w.:-]/, '_') %> hdr_end(host) -i <%= domain %>
+      <% if app_config['mounted_at'] -%>
+  acl photoapp_application_<%= app_name %>_domain_<%= domain.gsub(/[^\w.:-]/, '_') %>_path path_beg <%= app_config['mounted_at'] %>
+      <% end -%>
+    <% end -%>
+  <% end -%>  
   
   # choose backend
   <% unless node[:haproxy][:static_applications].empty? || node[:haproxy][:static_backends].empty? -%>
@@ -224,6 +256,18 @@ frontend http-in
     <% end -%>
   <% end -%>
     
+  <% unless node[:haproxy][:photoapp_applications].empty? || node[:haproxy][:photoapp_backends].empty? -%>
+    <% node[:haproxy][:photoapp_applications].each do |app_name, app_config| -%>
+      <% app_config['domains'].each do |domain| -%>
+        <% if app_config['mounted_at'] -%>
+  use_backend photoapp_app_servers if photoapp_application_<%= app_name %>_domain_<%= domain.gsub(/[^\w.:-]/, '_') %> photoapp_application_<%= app_name %>_domain_<%= domain %>_path
+        <% else -%>
+  use_backend photoapp_app_servers if photoapp_application_<%= app_name %>_domain_<%= domain.gsub(/[^\w.:-]/, '_') %>
+        <% end -%>
+      <% end -%>
+    <% end -%>
+  <% end -%>    
+    
   <% if !node[:haproxy][:rails_backends].empty? -%>
   default_backend rails_app_servers
   <% elsif !node[:haproxy][:php_backends].empty? -%>
@@ -232,6 +276,8 @@ frontend http-in
   default_backend nodejs_app_servers
   <% elsif !node[:haproxy][:static_backends].empty? -%>
   default_backend static_servers
+  <% elsif !node[:haproxy][:photoapp_backends].empty? -%>
+  default_backend photoapp_servers
   <% end -%>
   
 frontend https-in
@@ -266,6 +312,13 @@ frontend https-in
     <% end -%>
   <% end -%>
 
+  # all domains of photoapp applications
+  <% node[:haproxy][:photoapp_applications].each do |app_name, app_config| -%>
+    <% app_config['domains'].each do |domain| -%>
+  acl photoapp_applications_ssl hdr_end(host) -i <%= domain %>
+    <% end -%>
+  <% end -%>
+
   <% unless node[:haproxy][:rails_applications].empty? || node[:haproxy][:rails_backends].empty? -%>
   use_backend rails_app_servers_ssl if rails_applications_ssl
   <% end -%>
@@ -278,6 +331,10 @@ frontend https-in
   <% unless node[:haproxy][:static_applications].empty? || node[:haproxy][:static_backends].empty? -%>
   use_backend static_servers_ssl if static_applications_ssl
   <% end -%>
+  <% unless node[:haproxy][:photoapp_applications].empty? || node[:haproxy][:photoapp_backends].empty? -%>
+    use_backend photoapp_servers_ssl if photoapp_applications_ssl
+  <% end -%>
+  
   
   <% if !node[:haproxy][:rails_backends].empty? -%>
   default_backend rails_app_servers_ssl
@@ -287,6 +344,8 @@ frontend https-in
   default_backend nodejs_app_servers_ssl
   <% elsif !node[:haproxy][:static_backends].empty? -%>
   default_backend static_servers_ssl
+  <% elsif !node[:haproxy][:photoapp_backends].empty? -%>
+  default_backend photoapp_servers_ssl
   <% end -%>
 
 <% end -%>  
