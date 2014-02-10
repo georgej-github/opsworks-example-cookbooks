@@ -1,0 +1,4 @@
+= DESCRIPTION:
+
+Customized opsworks haproxy template.
+
